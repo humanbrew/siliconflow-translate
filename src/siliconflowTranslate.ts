@@ -117,8 +117,10 @@ export class SiliconFlowTranslate implements ITranslate {
    * 检测是否是代码注释格式（JSDoc、单行注释、多行注释等）
    */
   private isCommentFormat(text: string): boolean {
+    const trimmed = text.trim();
+
     // 检测JSDoc格式 /** ... */
-    if (text.trim().startsWith('/**') || text.includes('*/')) {
+    if (trimmed.startsWith('/**') || (trimmed.includes('/**') && trimmed.includes('*/'))) {
       return true;
     }
     // 检测单行注释 //
@@ -137,6 +139,93 @@ export class SiliconFlowTranslate implements ITranslate {
   }
 
   /**
+   * 检测注释类型
+   */
+  private detectCommentType(text: string): string {
+    const trimmed = text.trim();
+    if (trimmed.startsWith('/**')) {
+      return 'JSDoc';
+    }
+    if (trimmed.startsWith('//')) {
+      return 'Single-line';
+    }
+    if (trimmed.startsWith('/*')) {
+      return 'Multi-line';
+    }
+    if (trimmed.startsWith('#')) {
+      return 'Python-style';
+    }
+    return 'Unknown';
+  }
+
+  /**
+   * 修复注释格式：将项目符号格式转换回JSDoc格式
+   */
+  private fixCommentFormat(translated: string, original: string): string {
+    // 如果翻译结果使用了项目符号，尝试修复
+    if (translated.includes('\n-') || translated.match(/^\s*-\s/m)) {
+      outputChannel.appendLine(`[SiliconFlow Translate] Detected bullet points, attempting to fix format...`);
+
+      // 检查原始注释是否是JSDoc格式
+      if (original.includes('/**') && original.includes('*/')) {
+        // 提取原始注释的结构
+        const originalLines = original.split('\n');
+        const translatedLines = translated.split('\n');
+
+        // 尝试重建JSDoc格式
+        let result: string[] = [];
+        let bulletIndex = 0;
+
+        for (const origLine of originalLines) {
+          const trimmedOrig = origLine.trim();
+
+          // 保留注释标记行
+          if (trimmedOrig.startsWith('/**') || trimmedOrig === '*/' || trimmedOrig === '*') {
+            result.push(origLine);
+          }
+          // 处理 @param, @returns 等标签行
+          else if (trimmedOrig.startsWith('@')) {
+            // 查找对应的翻译行（包含项目符号的）
+            if (bulletIndex < translatedLines.length) {
+              const bulletLine = translatedLines[bulletIndex].trim();
+              // 提取标签和描述
+              const tagMatch = trimmedOrig.match(/^(@\w+)\s+(.+?)\s*-\s*(.+)$/);
+              if (tagMatch) {
+                const [, tag, param, desc] = tagMatch;
+                // 从项目符号行提取翻译的描述
+                const translatedDesc = bulletLine.replace(/^-\s*/, '').trim();
+                result.push(` * ${tag} ${param} - ${translatedDesc}`);
+                bulletIndex++;
+              } else {
+                result.push(origLine);
+              }
+            } else {
+              result.push(origLine);
+            }
+          }
+          // 处理普通描述行
+          else if (trimmedOrig.startsWith('*') && !trimmedOrig.startsWith('* @')) {
+            // 查找对应的翻译
+            if (bulletIndex < translatedLines.length) {
+              const translatedDesc = translatedLines[bulletIndex].replace(/^-\s*/, '').trim();
+              result.push(` * ${translatedDesc}`);
+              bulletIndex++;
+            } else {
+              result.push(origLine);
+            }
+          } else {
+            result.push(origLine);
+          }
+        }
+
+        return result.join('\n');
+      }
+    }
+
+    return translated;
+  }
+
+  /**
    * 构建翻译提示词 - 针对代码注释格式优化
    */
   private buildTranslatePrompt(content: string, targetLang: string): string {
@@ -144,16 +233,42 @@ export class SiliconFlowTranslate implements ITranslate {
     const isComment = this.isCommentFormat(content);
 
     if (isComment) {
-      return `Translate the following code comment to ${targetLangName}. IMPORTANT RULES:
-1. Preserve ALL comment structure exactly (/** */, //, /* */, #, etc.)
-2. Preserve ALL JSDoc tags (@param, @returns, @private, etc.) - DO NOT translate them
-3. Preserve parameter names, variable names, and code identifiers - DO NOT translate them
-4. Preserve line prefixes like "* " in JSDoc comments
-5. Only translate descriptive text, not code elements
-6. Maintain the exact same line structure and indentation
-7. Return ONLY the translated comment, no explanations
+      return `Translate the following code comment to ${targetLangName}. CRITICAL FORMATTING RULES:
 
-Original comment:
+1. PRESERVE EXACT STRUCTURE:
+   - Keep /** at the start and */ at the end EXACTLY
+   - Keep * prefix on EVERY line inside the comment block
+   - Keep ALL JSDoc tags (@param, @returns, @throws, @private, etc.) EXACTLY as they are
+   - Keep parameter names, variable names, and code identifiers UNCHANGED
+
+2. DO NOT CHANGE FORMAT:
+   - DO NOT use bullet points (-) or numbered lists (1., 2., etc.)
+   - DO NOT change the line structure or add/remove line breaks
+   - DO NOT reformat or reorganize the comment
+   - DO NOT convert JSDoc format to other formats
+   - DO NOT add explanations or additional content
+
+3. ONLY TRANSLATE DESCRIPTIVE TEXT:
+   - Translate: "@param name - description" → "@param name - 描述"
+   - DO NOT translate: "@param", "name", "-", "@returns", "@throws", etc.
+   - DO NOT translate code identifiers, type names, or variable names
+
+4. EXAMPLE:
+   Original:
+   /**
+    * Function description
+    * @param param1 - parameter description
+    * @returns return description
+    */
+   
+   Translated (Chinese):
+   /**
+    * 函数描述
+    * @param param1 - 参数描述
+    * @returns 返回值描述
+    */
+
+Original comment to translate:
 ${content}`;
     } else {
       return `Translate the following text to ${targetLangName}. Preserve any code formatting, structure, and special characters. Only return the translation, no explanations:
@@ -169,16 +284,42 @@ ${content}`;
     const isComment = this.isCommentFormat(content);
 
     if (isComment) {
-      return `Translate the following code comment to Chinese. IMPORTANT RULES:
-1. Preserve ALL comment structure exactly (/** */, //, /* */, #, etc.)
-2. Preserve ALL JSDoc tags (@param, @returns, @private, etc.) - DO NOT translate them
-3. Preserve parameter names, variable names, and code identifiers - DO NOT translate them
-4. Preserve line prefixes like "* " in JSDoc comments
-5. Only translate descriptive text, not code elements
-6. Maintain the exact same line structure and indentation
-7. Return ONLY the translated comment, no explanations
+      return `Translate the following code comment to Chinese. CRITICAL FORMATTING RULES:
 
-Original comment:
+1. PRESERVE EXACT STRUCTURE:
+   - Keep /** at the start and */ at the end EXACTLY
+   - Keep * prefix on EVERY line inside the comment block
+   - Keep ALL JSDoc tags (@param, @returns, @throws, @private, etc.) EXACTLY as they are
+   - Keep parameter names, variable names, and code identifiers UNCHANGED
+
+2. DO NOT CHANGE FORMAT:
+   - DO NOT use bullet points (-) or numbered lists (1., 2., etc.)
+   - DO NOT change the line structure or add/remove line breaks
+   - DO NOT reformat or reorganize the comment
+   - DO NOT convert JSDoc format to other formats
+   - DO NOT add explanations or additional content
+
+3. ONLY TRANSLATE DESCRIPTIVE TEXT:
+   - Translate: "@param name - description" → "@param name - 描述"
+   - DO NOT translate: "@param", "name", "-", "@returns", "@throws", etc.
+   - DO NOT translate code identifiers, type names, or variable names
+
+4. EXAMPLE:
+   Original:
+   /**
+    * Function description
+    * @param param1 - parameter description
+    * @returns return description
+    */
+   
+   Translated (Chinese):
+   /**
+    * 函数描述
+    * @param param1 - 参数描述
+    * @returns 返回值描述
+    */
+
+Original comment to translate:
 ${content}`;
     } else {
       return `Translate the following text to Chinese. Preserve any code formatting, structure, and special characters. Only return the translation, no explanations:
@@ -189,7 +330,7 @@ ${content}`;
 
   async translate(content: string, options: ITranslateOptions): Promise<string> {
     const { to = 'auto', from } = options;
-    outputChannel.appendLine(`hello world`);
+    outputChannel.appendLine(`hello world: ${content}`);
 
     // 输出翻译请求日志
     outputChannel.appendLine(`[SiliconFlow Translate] Translation request received`);
@@ -233,8 +374,16 @@ ${content}`;
       : this.buildTranslatePrompt(content, targetLang);
 
     const isComment = this.isCommentFormat(content);
+
+    // 输出格式检测结果
+    outputChannel.appendLine(`[SiliconFlow Translate] Format detection:`);
+    outputChannel.appendLine(`  - Is comment format: ${isComment}`);
+    if (isComment) {
+      outputChannel.appendLine(`  - Comment type: ${this.detectCommentType(content)}`);
+    }
+
     const systemPrompt = isComment
-      ? 'You are a professional code comment translator. You specialize in translating code comments while preserving all structural elements, JSDoc tags, code identifiers, and formatting. You only translate descriptive text, never code elements or tags.'
+      ? 'You are a professional code comment translator. Your ONLY job is to translate descriptive text while preserving EVERY structural element EXACTLY. You MUST keep JSDoc format, tags, identifiers, and line structure unchanged. NEVER use bullet points or change the format.'
       : 'You are a professional translation assistant. Translate the text accurately to the target language, maintaining the original meaning, style, and formatting.';
 
     const messages: ChatMessage[] = [
@@ -285,14 +434,44 @@ ${content}`;
       }
 
       if (response.data && response.data.choices && response.data.choices.length > 0) {
-        const translatedText = response.data.choices[0].message.content.trim();
+        let translatedText = response.data.choices[0].message.content.trim();
 
         outputChannel.appendLine(`[SiliconFlow Translate] Response.data: ${JSON.stringify(response.data)}`);
 
         outputChannel.appendLine(`[SiliconFlow Translate] Translation completed:`);
         outputChannel.appendLine(`  - Translated length: ${translatedText.length} characters`);
-        // outputChannel.appendLine(`  - Preview: ${translatedText.substring(0, 100)}${translatedText.length > 100 ? '...' : ''}`);
         outputChannel.appendLine(`  - Preview ALL: ${translatedText}`);
+
+        // 格式验证和修复
+        if (isComment && content.includes('/**')) {
+          // 检查是否保留了JSDoc格式
+          const hasJSDocStart = translatedText.includes('/**');
+          const hasJSDocEnd = translatedText.includes('*/');
+          const hasStarPrefix = translatedText.split('\n').some(line =>
+            line.trim().startsWith('*') && !line.trim().startsWith('*/')
+          );
+
+          outputChannel.appendLine(`[SiliconFlow Translate] Format validation:`);
+          outputChannel.appendLine(`  - Has /** : ${hasJSDocStart}`);
+          outputChannel.appendLine(`  - Has */ : ${hasJSDocEnd}`);
+          outputChannel.appendLine(`  - Has * prefix: ${hasStarPrefix}`);
+
+          // 检查是否使用了项目符号（不应该）
+          const hasBullets = translatedText.includes('\n-') || translatedText.match(/^\s*-\s/m);
+          if (hasBullets) {
+            outputChannel.appendLine(`[SiliconFlow Translate] WARNING: Bullet points detected in translation!`);
+            outputChannel.appendLine(`  - Attempting to fix format...`);
+            translatedText = this.fixCommentFormat(translatedText, content);
+            outputChannel.appendLine(`  - Fixed result: ${translatedText.substring(0, 200)}...`);
+          }
+
+          // 如果格式完全丢失，尝试修复
+          if (!hasJSDocStart || !hasJSDocEnd) {
+            outputChannel.appendLine(`[SiliconFlow Translate] WARNING: JSDoc format not preserved!`);
+            outputChannel.appendLine(`  - Attempting to restore format...`);
+            translatedText = this.fixCommentFormat(translatedText, content);
+          }
+        }
 
         // 如果返回的内容包含原始提示词，尝试提取纯翻译结果
         // 有些模型可能会返回包含提示的内容
