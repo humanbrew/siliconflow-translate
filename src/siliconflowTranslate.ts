@@ -114,164 +114,50 @@ export class SiliconFlowTranslate implements ITranslate {
   }
 
   /**
-   * 检测是否是代码注释格式（JSDoc、单行注释、多行注释等）
+   * 检测是否包含JSDoc标签（用于优化提示词）
+   * 注意：content参数不包含注释标记，只包含纯文本
    */
-  private isCommentFormat(text: string): boolean {
-    const trimmed = text.trim();
-
-    // 检测JSDoc格式 /** ... */
-    if (trimmed.startsWith('/**') || (trimmed.includes('/**') && trimmed.includes('*/'))) {
-      return true;
-    }
-    // 检测单行注释 //
-    if (text.split('\n').some(line => line.trim().startsWith('//'))) {
-      return true;
-    }
-    // 检测多行注释 /* ... */
-    if (text.includes('/*') && text.includes('*/')) {
-      return true;
-    }
-    // 检测Python风格的注释 #
-    if (text.split('\n').some(line => line.trim().startsWith('#'))) {
-      return true;
-    }
-    return false;
+  private hasJSDocTags(text: string): boolean {
+    // 检测JSDoc标签，即使没有注释标记
+    const jsdocTags = ['@param', '@returns', '@throws', '@private', '@public', '@deprecated', '@example', '@see', '@since', '@author', '@version'];
+    return jsdocTags.some(tag => text.includes(tag));
   }
 
   /**
-   * 检测注释类型
-   */
-  private detectCommentType(text: string): string {
-    const trimmed = text.trim();
-    if (trimmed.startsWith('/**')) {
-      return 'JSDoc';
-    }
-    if (trimmed.startsWith('//')) {
-      return 'Single-line';
-    }
-    if (trimmed.startsWith('/*')) {
-      return 'Multi-line';
-    }
-    if (trimmed.startsWith('#')) {
-      return 'Python-style';
-    }
-    return 'Unknown';
-  }
-
-  /**
-   * 修复注释格式：将项目符号格式转换回JSDoc格式
-   */
-  private fixCommentFormat(translated: string, original: string): string {
-    // 如果翻译结果使用了项目符号，尝试修复
-    if (translated.includes('\n-') || translated.match(/^\s*-\s/m)) {
-      outputChannel.appendLine(`[SiliconFlow Translate] Detected bullet points, attempting to fix format...`);
-
-      // 检查原始注释是否是JSDoc格式
-      if (original.includes('/**') && original.includes('*/')) {
-        // 提取原始注释的结构
-        const originalLines = original.split('\n');
-        const translatedLines = translated.split('\n');
-
-        // 尝试重建JSDoc格式
-        let result: string[] = [];
-        let bulletIndex = 0;
-
-        for (const origLine of originalLines) {
-          const trimmedOrig = origLine.trim();
-
-          // 保留注释标记行
-          if (trimmedOrig.startsWith('/**') || trimmedOrig === '*/' || trimmedOrig === '*') {
-            result.push(origLine);
-          }
-          // 处理 @param, @returns 等标签行
-          else if (trimmedOrig.startsWith('@')) {
-            // 查找对应的翻译行（包含项目符号的）
-            if (bulletIndex < translatedLines.length) {
-              const bulletLine = translatedLines[bulletIndex].trim();
-              // 提取标签和描述
-              const tagMatch = trimmedOrig.match(/^(@\w+)\s+(.+?)\s*-\s*(.+)$/);
-              if (tagMatch) {
-                const [, tag, param, desc] = tagMatch;
-                // 从项目符号行提取翻译的描述
-                const translatedDesc = bulletLine.replace(/^-\s*/, '').trim();
-                result.push(` * ${tag} ${param} - ${translatedDesc}`);
-                bulletIndex++;
-              } else {
-                result.push(origLine);
-              }
-            } else {
-              result.push(origLine);
-            }
-          }
-          // 处理普通描述行
-          else if (trimmedOrig.startsWith('*') && !trimmedOrig.startsWith('* @')) {
-            // 查找对应的翻译
-            if (bulletIndex < translatedLines.length) {
-              const translatedDesc = translatedLines[bulletIndex].replace(/^-\s*/, '').trim();
-              result.push(` * ${translatedDesc}`);
-              bulletIndex++;
-            } else {
-              result.push(origLine);
-            }
-          } else {
-            result.push(origLine);
-          }
-        }
-
-        return result.join('\n');
-      }
-    }
-
-    return translated;
-  }
-
-  /**
-   * 构建翻译提示词 - 针对代码注释格式优化
+   * 构建翻译提示词
+   * 注意：content参数是纯文本（不包含注释标记），Comment Translate会在显示时重新应用格式
+   * 参考 Google Translate 的实现：简单直接，返回纯文本翻译
    */
   private buildTranslatePrompt(content: string, targetLang: string): string {
     const targetLangName = convertLang(targetLang);
-    const isComment = this.isCommentFormat(content);
+    const hasTags = this.hasJSDocTags(content);
+    const lines = content.split('\n');
+    const lineCount = lines.length;
 
-    if (isComment) {
-      return `Translate the following code comment to ${targetLangName}. CRITICAL FORMATTING RULES:
+    // 构建逐行翻译的提示
+    const lineByLinePrompt = lines.map((line, index) => `Line ${index + 1}: ${line}`).join('\n');
 
-1. PRESERVE EXACT STRUCTURE:
-   - Keep /** at the start and */ at the end EXACTLY
-   - Keep * prefix on EVERY line inside the comment block
-   - Keep ALL JSDoc tags (@param, @returns, @throws, @private, etc.) EXACTLY as they are
-   - Keep parameter names, variable names, and code identifiers UNCHANGED
+    if (hasTags) {
+      return `Translate the following text to ${targetLangName}. 
 
-2. DO NOT CHANGE FORMAT:
-   - DO NOT use bullet points (-) or numbered lists (1., 2., etc.)
-   - DO NOT change the line structure or add/remove line breaks
-   - DO NOT reformat or reorganize the comment
-   - DO NOT convert JSDoc format to other formats
-   - DO NOT add explanations or additional content
+CRITICAL RULES:
+1. Translate line by line. Keep EXACTLY ${lineCount} lines.
+2. For each line:
+   - If line starts with "@param", "@returns", "@throws", etc.: Keep the tag and parameter name, only translate the description after "-"
+   - If line contains code identifiers (variable names, function names): Keep them unchanged
+   - Otherwise: Translate the entire line
+3. DO NOT use bullet points (-), numbered lists, or any formatting markers
+4. DO NOT add explanations or additional content
+5. Return ONLY the translated text, one line per line
 
-3. ONLY TRANSLATE DESCRIPTIVE TEXT:
-   - Translate: "@param name - description" → "@param name - 描述"
-   - DO NOT translate: "@param", "name", "-", "@returns", "@throws", etc.
-   - DO NOT translate code identifiers, type names, or variable names
+Input (${lineCount} lines):
+${lineByLinePrompt}
 
-4. EXAMPLE:
-   Original:
-   /**
-    * Function description
-    * @param param1 - parameter description
-    * @returns return description
-    */
-   
-   Translated (Chinese):
-   /**
-    * 函数描述
-    * @param param1 - 参数描述
-    * @returns 返回值描述
-    */
-
-Original comment to translate:
-${content}`;
+Output (${lineCount} lines, translate each line):`;
     } else {
-      return `Translate the following text to ${targetLangName}. Preserve any code formatting, structure, and special characters. Only return the translation, no explanations:
+      return `Translate the following text to ${targetLangName}. 
+Keep EXACTLY ${lineCount} lines. Translate line by line. DO NOT use bullet points or numbered lists.
+Return ONLY the translation:
 
 ${content}`;
     }
@@ -281,48 +167,34 @@ ${content}`;
    * 检测源语言并构建翻译提示词（默认翻译成中文）
    */
   private buildAutoTranslatePrompt(content: string): string {
-    const isComment = this.isCommentFormat(content);
+    const hasTags = this.hasJSDocTags(content);
+    const lines = content.split('\n');
+    const lineCount = lines.length;
 
-    if (isComment) {
-      return `Translate the following code comment to Chinese. CRITICAL FORMATTING RULES:
+    // 构建逐行翻译的提示
+    const lineByLinePrompt = lines.map((line, index) => `Line ${index + 1}: ${line}`).join('\n');
 
-1. PRESERVE EXACT STRUCTURE:
-   - Keep /** at the start and */ at the end EXACTLY
-   - Keep * prefix on EVERY line inside the comment block
-   - Keep ALL JSDoc tags (@param, @returns, @throws, @private, etc.) EXACTLY as they are
-   - Keep parameter names, variable names, and code identifiers UNCHANGED
+    if (hasTags) {
+      return `Translate the following text to Chinese.
 
-2. DO NOT CHANGE FORMAT:
-   - DO NOT use bullet points (-) or numbered lists (1., 2., etc.)
-   - DO NOT change the line structure or add/remove line breaks
-   - DO NOT reformat or reorganize the comment
-   - DO NOT convert JSDoc format to other formats
-   - DO NOT add explanations or additional content
+CRITICAL RULES:
+1. Translate line by line. Keep EXACTLY ${lineCount} lines.
+2. For each line:
+   - If line starts with "@param", "@returns", "@throws", etc.: Keep the tag and parameter name, only translate the description after "-"
+   - If line contains code identifiers (variable names, function names): Keep them unchanged
+   - Otherwise: Translate the entire line
+3. DO NOT use bullet points (-), numbered lists, or any formatting markers
+4. DO NOT add explanations or additional content
+5. Return ONLY the translated text, one line per line
 
-3. ONLY TRANSLATE DESCRIPTIVE TEXT:
-   - Translate: "@param name - description" → "@param name - 描述"
-   - DO NOT translate: "@param", "name", "-", "@returns", "@throws", etc.
-   - DO NOT translate code identifiers, type names, or variable names
+Input (${lineCount} lines):
+${lineByLinePrompt}
 
-4. EXAMPLE:
-   Original:
-   /**
-    * Function description
-    * @param param1 - parameter description
-    * @returns return description
-    */
-   
-   Translated (Chinese):
-   /**
-    * 函数描述
-    * @param param1 - 参数描述
-    * @returns 返回值描述
-    */
-
-Original comment to translate:
-${content}`;
+Output (${lineCount} lines, translate each line):`;
     } else {
-      return `Translate the following text to Chinese. Preserve any code formatting, structure, and special characters. Only return the translation, no explanations:
+      return `Translate the following text to Chinese.
+Keep EXACTLY ${lineCount} lines. Translate line by line. DO NOT use bullet points or numbered lists.
+Return ONLY the translation:
 
 ${content}`;
     }
@@ -330,7 +202,6 @@ ${content}`;
 
   async translate(content: string, options: ITranslateOptions): Promise<string> {
     const { to = 'auto', from } = options;
-    outputChannel.appendLine(`hello world: ${content}`);
 
     // 输出翻译请求日志
     outputChannel.appendLine(`[SiliconFlow Translate] Translation request received`);
@@ -373,18 +244,19 @@ ${content}`;
       ? this.buildAutoTranslatePrompt(content)
       : this.buildTranslatePrompt(content, targetLang);
 
-    const isComment = this.isCommentFormat(content);
+    const hasTags = this.hasJSDocTags(content);
+    const lineCount = content.split('\n').length;
 
-    // 输出格式检测结果
-    outputChannel.appendLine(`[SiliconFlow Translate] Format detection:`);
-    outputChannel.appendLine(`  - Is comment format: ${isComment}`);
-    if (isComment) {
-      outputChannel.appendLine(`  - Comment type: ${this.detectCommentType(content)}`);
-    }
+    // 输出内容分析
+    outputChannel.appendLine(`[SiliconFlow Translate] Content analysis:`);
+    outputChannel.appendLine(`  - Has JSDoc tags: ${hasTags}`);
+    outputChannel.appendLine(`  - Line count: ${lineCount}`);
+    outputChannel.appendLine(`  - Note: Comment Translate will reapply format automatically (like Google Translate)`);
 
-    const systemPrompt = isComment
-      ? 'You are a professional code comment translator. Your ONLY job is to translate descriptive text while preserving EVERY structural element EXACTLY. You MUST keep JSDoc format, tags, identifiers, and line structure unchanged. NEVER use bullet points or change the format.'
-      : 'You are a professional translation assistant. Translate the text accurately to the target language, maintaining the original meaning, style, and formatting.';
+    // 参考 Google Translate：简单直接的系统提示词
+    const systemPrompt = hasTags
+      ? 'You are a code comment translator. Translate line by line. Preserve JSDoc tags (@param, @returns, etc.) and code identifiers exactly. Keep the same number of lines. Never use bullet points or numbered lists.'
+      : 'You are a translator. Translate line by line. Keep the same number of lines. Never use bullet points or numbered lists.';
 
     const messages: ChatMessage[] = [
       {
@@ -436,62 +308,89 @@ ${content}`;
       if (response.data && response.data.choices && response.data.choices.length > 0) {
         let translatedText = response.data.choices[0].message.content.trim();
 
-        outputChannel.appendLine(`[SiliconFlow Translate] Response.data: ${JSON.stringify(response.data)}`);
-
         outputChannel.appendLine(`[SiliconFlow Translate] Translation completed:`);
         outputChannel.appendLine(`  - Translated length: ${translatedText.length} characters`);
-        outputChannel.appendLine(`  - Preview ALL: ${translatedText}`);
 
-        // 格式验证和修复
-        if (isComment && content.includes('/**')) {
-          // 检查是否保留了JSDoc格式
-          const hasJSDocStart = translatedText.includes('/**');
-          const hasJSDocEnd = translatedText.includes('*/');
-          const hasStarPrefix = translatedText.split('\n').some(line =>
-            line.trim().startsWith('*') && !line.trim().startsWith('*/')
-          );
+        // 参考 Google Translate 的后处理：移除可能的多余空格
+        // Google Translate 使用: trans.replace(/((\/|\*|-) )/g, '$2')
+        // 我们简化处理：移除行首的项目符号和多余空格
+        translatedText = translatedText.split('\n').map(line => {
+          // 移除项目符号
+          line = line.replace(/^\s*[-•]\s*/, '');
+          // 移除行首多余空格（但保留必要的缩进）
+          return line.trimStart();
+        }).join('\n');
 
-          outputChannel.appendLine(`[SiliconFlow Translate] Format validation:`);
-          outputChannel.appendLine(`  - Has /** : ${hasJSDocStart}`);
-          outputChannel.appendLine(`  - Has */ : ${hasJSDocEnd}`);
-          outputChannel.appendLine(`  - Has * prefix: ${hasStarPrefix}`);
+        const originalLines = content.split('\n');
+        const translatedLines = translatedText.split('\n');
 
-          // 检查是否使用了项目符号（不应该）
-          const hasBullets = translatedText.includes('\n-') || translatedText.match(/^\s*-\s/m);
-          if (hasBullets) {
-            outputChannel.appendLine(`[SiliconFlow Translate] WARNING: Bullet points detected in translation!`);
-            outputChannel.appendLine(`  - Attempting to fix format...`);
-            translatedText = this.fixCommentFormat(translatedText, content);
-            outputChannel.appendLine(`  - Fixed result: ${translatedText.substring(0, 200)}...`);
-          }
+        outputChannel.appendLine(`  - Original lines: ${originalLines.length}`);
+        outputChannel.appendLine(`  - Translated lines: ${translatedLines.length}`);
+        outputChannel.appendLine(`  - Preview: ${translatedText.substring(0, 200)}${translatedText.length > 200 ? '...' : ''}`);
 
-          // 如果格式完全丢失，尝试修复
-          if (!hasJSDocStart || !hasJSDocEnd) {
-            outputChannel.appendLine(`[SiliconFlow Translate] WARNING: JSDoc format not preserved!`);
-            outputChannel.appendLine(`  - Attempting to restore format...`);
-            translatedText = this.fixCommentFormat(translatedText, content);
+        // 验证行结构匹配（关键！Comment Translate 需要行数匹配才能正确应用格式）
+        if (originalLines.length !== translatedLines.length) {
+          outputChannel.appendLine(`[SiliconFlow Translate] WARNING: Line count mismatch! This may cause format issues.`);
+          outputChannel.appendLine(`  - Original: ${originalLines.length} lines`);
+          outputChannel.appendLine(`  - Translated: ${translatedLines.length} lines`);
+
+          // 尝试修复：如果翻译结果行数少于原始，可能是合并了空行
+          // 如果翻译结果行数多于原始，可能是拆分了行
+          // 这里我们尽量保持原始行数
+          if (translatedLines.length < originalLines.length) {
+            // 翻译结果行数少，可能需要补充空行
+            outputChannel.appendLine(`  - Attempting to match line count...`);
+            const fixedLines: string[] = [];
+            let transIndex = 0;
+            for (let i = 0; i < originalLines.length; i++) {
+              if (originalLines[i].trim() === '') {
+                // 原始是空行，保持空行
+                fixedLines.push('');
+              } else if (transIndex < translatedLines.length) {
+                fixedLines.push(translatedLines[transIndex]);
+                transIndex++;
+              } else {
+                // 翻译结果不够，使用原始行
+                fixedLines.push(originalLines[i]);
+              }
+            }
+            translatedText = fixedLines.join('\n');
+            outputChannel.appendLine(`  - Fixed to ${fixedLines.length} lines`);
+          } else if (translatedLines.length > originalLines.length) {
+            // 翻译结果行数多，可能需要合并
+            outputChannel.appendLine(`  - Translation has more lines, keeping first ${originalLines.length} lines`);
+            translatedText = translatedLines.slice(0, originalLines.length).join('\n');
           }
         }
 
-        // 如果返回的内容包含原始提示词，尝试提取纯翻译结果
-        // 有些模型可能会返回包含提示的内容
-        if (translatedText.includes(content)) {
-          outputChannel.appendLine(`[SiliconFlow Translate] Detected original content in response, filtering...`);
-          // 尝试提取翻译后的部分
+        // 检查是否仍包含项目符号
+        const hasBullets = translatedText.includes('\n-') || translatedText.match(/^\s*[-•]\s/m);
+        if (hasBullets) {
+          outputChannel.appendLine(`[SiliconFlow Translate] WARNING: Bullet points still detected after cleanup!`);
+        }
+
+        // 如果返回的内容包含原始提示词或说明文字，尝试提取纯翻译结果
+        const lowerText = translatedText.toLowerCase();
+        if (lowerText.includes('translat') || lowerText.includes('翻译') || lowerText.includes('output') || lowerText.includes('输入')) {
+          outputChannel.appendLine(`[SiliconFlow Translate] Detected explanation text, attempting to extract translation...`);
           const lines = translatedText.split('\n');
-          const filteredLines = lines.filter(line =>
-            !line.includes('翻译') &&
-            !line.includes('translate') &&
-            line.trim().length > 0 &&
-            !line.includes(content)
-          );
-          if (filteredLines.length > 0) {
-            const filteredText = filteredLines.join('\n').trim();
-            outputChannel.appendLine(`[SiliconFlow Translate] Filtered translation returned`);
-            return filteredText;
+          const filteredLines = lines.filter(line => {
+            const lowerLine = line.toLowerCase();
+            return !lowerLine.includes('translat') &&
+              !lowerLine.includes('翻译') &&
+              !lowerLine.includes('output') &&
+              !lowerLine.includes('输入') &&
+              !lowerLine.includes('line') &&
+              !lowerLine.includes('行') &&
+              line.trim().length > 0;
+          });
+          if (filteredLines.length > 0 && filteredLines.length === originalLines.length) {
+            translatedText = filteredLines.join('\n');
+            outputChannel.appendLine(`  - Extracted ${filteredLines.length} lines`);
           }
         }
 
+        // 返回纯文本翻译（Comment Translate 会自动重新应用格式）
         return translatedText;
       } else {
         const errorMsg = '翻译响应格式错误';
