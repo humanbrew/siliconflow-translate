@@ -104,26 +104,82 @@ export class SiliconFlowTranslate implements ITranslate {
   }
 
   /**
-   * 构建翻译提示词
+   * 检测是否是代码注释格式（JSDoc、单行注释、多行注释等）
+   */
+  private isCommentFormat(text: string): boolean {
+    // 检测JSDoc格式 /** ... */
+    if (text.trim().startsWith('/**') || text.includes('*/')) {
+      return true;
+    }
+    // 检测单行注释 //
+    if (text.split('\n').some(line => line.trim().startsWith('//'))) {
+      return true;
+    }
+    // 检测多行注释 /* ... */
+    if (text.includes('/*') && text.includes('*/')) {
+      return true;
+    }
+    // 检测Python风格的注释 #
+    if (text.split('\n').some(line => line.trim().startsWith('#'))) {
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * 构建翻译提示词 - 针对代码注释格式优化
    */
   private buildTranslatePrompt(content: string, targetLang: string): string {
     const targetLangName = convertLang(targetLang);
-    return `Translate the following text to ${targetLangName}. Only return the translation, no explanations or additional content:
+    const isComment = this.isCommentFormat(content);
+
+    if (isComment) {
+      return `Translate the following code comment to ${targetLangName}. IMPORTANT RULES:
+1. Preserve ALL comment structure exactly (/** */, //, /* */, #, etc.)
+2. Preserve ALL JSDoc tags (@param, @returns, @private, etc.) - DO NOT translate them
+3. Preserve parameter names, variable names, and code identifiers - DO NOT translate them
+4. Preserve line prefixes like "* " in JSDoc comments
+5. Only translate descriptive text, not code elements
+6. Maintain the exact same line structure and indentation
+7. Return ONLY the translated comment, no explanations
+
+Original comment:
+${content}`;
+    } else {
+      return `Translate the following text to ${targetLangName}. Preserve any code formatting, structure, and special characters. Only return the translation, no explanations:
 
 ${content}`;
+    }
   }
 
   /**
    * 检测源语言并构建翻译提示词（默认翻译成中文）
    */
   private buildAutoTranslatePrompt(content: string): string {
-    return `Translate the following text to Chinese. Only return the translation, no explanations or additional content:
+    const isComment = this.isCommentFormat(content);
+
+    if (isComment) {
+      return `Translate the following code comment to Chinese. IMPORTANT RULES:
+1. Preserve ALL comment structure exactly (/** */, //, /* */, #, etc.)
+2. Preserve ALL JSDoc tags (@param, @returns, @private, etc.) - DO NOT translate them
+3. Preserve parameter names, variable names, and code identifiers - DO NOT translate them
+4. Preserve line prefixes like "* " in JSDoc comments
+5. Only translate descriptive text, not code elements
+6. Maintain the exact same line structure and indentation
+7. Return ONLY the translated comment, no explanations
+
+Original comment:
+${content}`;
+    } else {
+      return `Translate the following text to Chinese. Preserve any code formatting, structure, and special characters. Only return the translation, no explanations:
 
 ${content}`;
+    }
   }
 
   async translate(content: string, options: ITranslateOptions): Promise<string> {
     const { to = 'auto', from } = options;
+    console.log('>>>>>>content', content)
 
     if (!this._defaultOption.apiKey) {
       throw new Error('请配置硅基流动API密钥！请在设置中配置 siliconflowTranslate.apiKey');
@@ -142,10 +198,15 @@ ${content}`;
       ? this.buildAutoTranslatePrompt(content)
       : this.buildTranslatePrompt(content, targetLang);
 
+    const isComment = this.isCommentFormat(content);
+    const systemPrompt = isComment
+      ? 'You are a professional code comment translator. You specialize in translating code comments while preserving all structural elements, JSDoc tags, code identifiers, and formatting. You only translate descriptive text, never code elements or tags.'
+      : 'You are a professional translation assistant. Translate the text accurately to the target language, maintaining the original meaning, style, and formatting.';
+
     const messages: ChatMessage[] = [
       {
         role: 'system',
-        content: 'You are a professional translation assistant. Translate the text accurately to the target language, maintaining the original meaning and style.'
+        content: systemPrompt
       },
       {
         role: 'user',
