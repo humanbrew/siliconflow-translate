@@ -1,6 +1,7 @@
 import axios, { AxiosResponse } from 'axios';
-import { workspace } from 'vscode';
+import { workspace, window } from 'vscode';
 import { ITranslate, ITranslateOptions } from 'comment-translate-manager';
+import { outputChannel } from './extension';
 
 const PREFIXCONFIG = 'siliconflowTranslate';
 
@@ -92,14 +93,23 @@ export class SiliconFlowTranslate implements ITranslate {
   }
 
   createOption(): SiliconFlowConfig {
+    const apiKey = getConfig<string>('apiKey');
     const defaultOption: SiliconFlowConfig = {
-      apiKey: getConfig<string>('apiKey'),
+      apiKey: apiKey,
       apiUrl: getConfig<string>('apiUrl') || 'https://api.siliconflow.cn/v1/chat/completions',
       model: getConfig<string>('model') || 'Qwen/Qwen2.5-7B-Instruct',
       temperature: getConfig<number>('temperature') ?? 0.3,
       enableThinking: getConfig<boolean>('enableThinking') ?? false,
       maxTokens: getConfig<number>('maxTokens') ?? 2000,
     };
+
+    // 输出配置信息到日志
+    outputChannel.appendLine(`[SiliconFlow Translate] Configuration loaded:`);
+    outputChannel.appendLine(`  - API Key: ${apiKey ? `${apiKey.substring(0, 8)}...` : 'NOT SET'}`);
+    outputChannel.appendLine(`  - Model: ${defaultOption.model}`);
+    outputChannel.appendLine(`  - API URL: ${defaultOption.apiUrl}`);
+    outputChannel.appendLine(`  - Temperature: ${defaultOption.temperature}`);
+
     return defaultOption;
   }
 
@@ -179,10 +189,34 @@ ${content}`;
 
   async translate(content: string, options: ITranslateOptions): Promise<string> {
     const { to = 'auto', from } = options;
-    console.log('>>>>>>content', content)
+    outputChannel.appendLine(`hello world`);
 
-    if (!this._defaultOption.apiKey) {
-      throw new Error('请配置硅基流动API密钥！请在设置中配置 siliconflowTranslate.apiKey');
+    // 输出翻译请求日志
+    outputChannel.appendLine(`[SiliconFlow Translate] Translation request received`);
+    outputChannel.appendLine(`  - Content length: ${content.length} characters`);
+    outputChannel.appendLine(`  - Target language: ${to}`);
+    outputChannel.appendLine(`  - Source language: ${from || 'auto'}`);
+    outputChannel.appendLine(`  - Content preview: ${content.substring(0, 100)}${content.length > 100 ? '...' : ''}`);
+
+    // 重新读取配置，确保获取最新值
+    const currentApiKey = getConfig<string>('apiKey');
+    const currentModel = getConfig<string>('model') || 'Qwen/Qwen2.5-7B-Instruct';
+
+    outputChannel.appendLine(`[SiliconFlow Translate] Current configuration:`);
+    outputChannel.appendLine(`  - API Key: ${currentApiKey ? `${currentApiKey.substring(0, 8)}...` : 'NOT SET'}`);
+    outputChannel.appendLine(`  - Model: ${currentModel}`);
+
+    // 使用最新读取的配置值进行验证
+    if (!currentApiKey || currentApiKey.trim() === '') {
+      const errorMsg = '请配置硅基流动API密钥！请在设置中配置 siliconflowTranslate.apiKey';
+      outputChannel.appendLine(`[SiliconFlow Translate] ERROR: ${errorMsg}`);
+      throw new Error(errorMsg);
+    }
+
+    // 更新内部配置（如果配置已更改）
+    if (currentApiKey !== this._defaultOption.apiKey || currentModel !== this._defaultOption.model) {
+      outputChannel.appendLine(`[SiliconFlow Translate] Configuration changed, updating...`);
+      this._defaultOption = this.createOption();
     }
 
     if (!this._defaultOption.model) {
@@ -233,18 +267,37 @@ ${content}`;
         'Authorization': `Bearer ${this._defaultOption.apiKey}`,
       };
 
+      outputChannel.appendLine(`[SiliconFlow Translate] Sending API request:`);
+      outputChannel.appendLine(`  - URL: ${apiUrl}`);
+      outputChannel.appendLine(`  - Model: ${requestBody.model}`);
+      outputChannel.appendLine(`  - Messages count: ${messages.length}`);
+
       const response: AxiosResponse<ChatCompletionResponse> = await axios.post(
         apiUrl,
         requestBody,
         { headers }
       );
 
+      outputChannel.appendLine(`[SiliconFlow Translate] API response received:`);
+      outputChannel.appendLine(`  - Status: ${response.status}`);
+      if (response.data.usage) {
+        outputChannel.appendLine(`  - Tokens used: ${response.data.usage.total_tokens} (prompt: ${response.data.usage.prompt_tokens}, completion: ${response.data.usage.completion_tokens})`);
+      }
+
       if (response.data && response.data.choices && response.data.choices.length > 0) {
         const translatedText = response.data.choices[0].message.content.trim();
+
+        outputChannel.appendLine(`[SiliconFlow Translate] Response.data: ${JSON.stringify(response.data)}`);
+
+        outputChannel.appendLine(`[SiliconFlow Translate] Translation completed:`);
+        outputChannel.appendLine(`  - Translated length: ${translatedText.length} characters`);
+        // outputChannel.appendLine(`  - Preview: ${translatedText.substring(0, 100)}${translatedText.length > 100 ? '...' : ''}`);
+        outputChannel.appendLine(`  - Preview ALL: ${translatedText}`);
 
         // 如果返回的内容包含原始提示词，尝试提取纯翻译结果
         // 有些模型可能会返回包含提示的内容
         if (translatedText.includes(content)) {
+          outputChannel.appendLine(`[SiliconFlow Translate] Detected original content in response, filtering...`);
           // 尝试提取翻译后的部分
           const lines = translatedText.split('\n');
           const filteredLines = lines.filter(line =>
@@ -254,35 +307,53 @@ ${content}`;
             !line.includes(content)
           );
           if (filteredLines.length > 0) {
-            return filteredLines.join('\n').trim();
+            const filteredText = filteredLines.join('\n').trim();
+            outputChannel.appendLine(`[SiliconFlow Translate] Filtered translation returned`);
+            return filteredText;
           }
         }
 
         return translatedText;
       } else {
-        throw new Error('翻译响应格式错误');
+        const errorMsg = '翻译响应格式错误';
+        outputChannel.appendLine(`[SiliconFlow Translate] ERROR: ${errorMsg}`);
+        throw new Error(errorMsg);
       }
     } catch (error: any) {
+      outputChannel.appendLine(`[SiliconFlow Translate] ERROR occurred:`);
+      outputChannel.appendLine(`  - Error message: ${error.message}`);
+
       if (error.response) {
         const status = error.response.status;
         const data = error.response.data;
 
+        outputChannel.appendLine(`  - HTTP Status: ${status}`);
+        outputChannel.appendLine(`  - Response data: ${JSON.stringify(data)}`);
+
+        let errorMsg: string;
         if (status === 401) {
-          throw new Error('API密钥无效，请检查配置的 siliconflowTranslate.apiKey');
+          errorMsg = 'API密钥无效，请检查配置的 siliconflowTranslate.apiKey';
         } else if (status === 403) {
-          throw new Error('API访问被拒绝，请检查API密钥权限');
+          errorMsg = 'API访问被拒绝，请检查API密钥权限';
         } else if (status === 429) {
-          throw new Error('请求频率过高，请稍后再试');
+          errorMsg = '请求频率过高，请稍后再试';
         } else if (status === 400) {
-          const errorMsg = typeof data === 'string' ? data : (data?.message || '请求参数错误');
-          throw new Error(`请求错误: ${errorMsg}`);
+          errorMsg = typeof data === 'string' ? data : (data?.message || '请求参数错误');
+          errorMsg = `请求错误: ${errorMsg}`;
         } else {
-          throw new Error(`API请求失败: ${status} - ${data?.message || error.message}`);
+          errorMsg = `API请求失败: ${status} - ${data?.message || error.message}`;
         }
+
+        outputChannel.appendLine(`  - Throwing error: ${errorMsg}`);
+        throw new Error(errorMsg);
       } else if (error.request) {
-        throw new Error('网络请求失败，请检查网络连接和API地址配置');
+        const errorMsg = '网络请求失败，请检查网络连接和API地址配置';
+        outputChannel.appendLine(`  - Network error: ${errorMsg}`);
+        throw new Error(errorMsg);
       } else {
-        throw new Error(`翻译失败: ${error.message}`);
+        const errorMsg = `翻译失败: ${error.message}`;
+        outputChannel.appendLine(`  - General error: ${errorMsg}`);
+        throw new Error(errorMsg);
       }
     }
   }
