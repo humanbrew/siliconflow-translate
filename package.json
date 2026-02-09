@@ -1,0 +1,104 @@
+{
+  "name": "siliconflow-translate",
+  "displayName": "SiliconFlow Translate",
+  "description": "硅基流动翻译源，用于comment-translate插件",
+  "version": "0.0.1",
+  "publisher": "siliconflow-translate",
+  "engines": {
+    "vscode": "^1.63.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "translateSource",
+    "comment translate",
+    "siliconflow",
+    "硅基流动",
+    "翻译",
+    "注释",
+    "翻訳"
+  ],
+  "homepage": "https://github.com/yourusername/siliconflow-translate#readme",
+  "bugs": {
+    "url": "https://github.com/yourusername/siliconflow-translate/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/siliconflow-translate.git"
+  },
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "icon": "icon.png",
+  "extensionDependencies": [
+    "intellsmi.comment-translate"
+  ],
+  "contributes": {
+    "configuration": {
+      "title": "SiliconFlow Translate Configuration",
+      "type": "object",
+      "properties": {
+        "siliconflowTranslate.apiKey": {
+          "type": "string",
+          "markdownDescription": "硅基流动API密钥。您可以在[硅基流动控制台](https://cloud.siliconflow.cn/account/ak)获取API Key。",
+          "default": ""
+        },
+        "siliconflowTranslate.apiUrl": {
+          "type": "string",
+          "markdownDescription": "自定义API接口地址",
+          "default": "https://api.siliconflow.cn/v1/chat/completions"
+        },
+        "siliconflowTranslate.model": {
+          "type": "string",
+          "markdownDescription": "选择使用的模型。可以免费使用小于10B的模型，如Qwen/Qwen2.5-7B-Instruct。查看[可用模型列表](https://cloud.siliconflow.cn/sft-d29cs9gh3vvc73c59kb0/models?types=chat)",
+          "default": "Qwen/Qwen2.5-7B-Instruct"
+        },
+        "siliconflowTranslate.temperature": {
+          "type": "number",
+          "markdownDescription": "控制回复的随机性，范围0-2。较低的值使输出更确定，较高的值使输出更随机。",
+          "default": 0.3,
+          "minimum": 0,
+          "maximum": 2
+        },
+        "siliconflowTranslate.enableThinking": {
+          "type": "boolean",
+          "markdownDescription": "是否启用思考过程输出（仅支持特定模型）",
+          "default": false
+        },
+        "siliconflowTranslate.maxTokens": {
+          "type": "number",
+          "markdownDescription": "生成的最大token数",
+          "default": 2000,
+          "minimum": 1,
+          "maximum": 8192
+        }
+      }
+    },
+    "translates": [
+      {
+        "translate": "siliconflow",
+        "title": "SiliconFlow Translate"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src --ext ts",
+    "test": "node ./out/test/runTest.js"
+  },
+  "devDependencies": {
+    "@types/node": "14.x",
+    "@types/vscode": "^1.63.0",
+    "@typescript-eslint/eslint-plugin": "^5.1.0",
+    "@typescript-eslint/parser": "^5.1.0",
+    "eslint": "^8.1.0",
+    "typescript": "^4.4.4"
+  },
+  "dependencies": {
+    "axios": "^0.21.4",
+    "comment-translate-manager": "^0.0.2"
+  }
+}
