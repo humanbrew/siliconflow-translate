@@ -2,7 +2,7 @@
   "name": "siliconflow-translate",
   "displayName": "SiliconFlow Translate",
   "description": "硅基流动翻译源，用于comment-translate插件",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "publisher": "dnybrew",
   "engines": {
     "vscode": "^1.63.0"
