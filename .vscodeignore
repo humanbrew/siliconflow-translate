@@ -1,8 +1,25 @@
-.vscode/**
-.vscode-test/**
-src/**
-.gitignore
-.eslintrc.json
+# 开发相关文件
+src/
+.vscode/
+*.tsbuildinfo
 tsconfig.json
-**/*.map
-**/*.ts
+.eslintrc.json
+yarn.lock
+package-lock.json
+node_modules/@types/
+
+# 开发和调试文档
+doc/
+*.backup
+
+# 测试相关
+test/
+*.test.js
+*.spec.js
+
+# 其他不需要的文件
+.github/
+.git/
+*.log
+*.tmp
+.DS_Store

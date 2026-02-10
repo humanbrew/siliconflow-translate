@@ -2,8 +2,8 @@
   "name": "siliconflow-translate",
   "displayName": "SiliconFlow Translate",
   "description": "硅基流动翻译源，用于comment-translate插件",
-  "version": "0.0.1",
-  "publisher": "siliconflow-translate",
+  "version": "1.0.0",
+  "publisher": "dnybrew",
   "engines": {
     "vscode": "^1.63.0"
   },
@@ -85,6 +85,7 @@
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
+    "bundle": "esbuild src/extension.ts --bundle --outfile=out/extension-bundle.js --external:vscode --format=cjs --platform=node",
     "pretest": "npm run compile && npm run lint",
     "lint": "eslint src --ext ts",
     "test": "node ./out/test/runTest.js"
@@ -94,6 +95,7 @@
     "@types/vscode": "^1.63.0",
     "@typescript-eslint/eslint-plugin": "^5.1.0",
     "@typescript-eslint/parser": "^5.1.0",
+    "esbuild": "^0.27.3",
     "eslint": "^8.1.0",
     "typescript": "^4.4.4"
   },

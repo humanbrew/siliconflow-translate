@@ -7,7 +7,7 @@ const outputChannel = vscode.window.createOutputChannel('SiliconFlow Translate')
 
 export function activate(context: vscode.ExtensionContext) {
   outputChannel.appendLine('[SiliconFlow Translate] Extension activated');
-  
+
   // 暴露插件给comment-translate
   return {
     extendTranslate: function (registry: ITranslateRegistry) {
