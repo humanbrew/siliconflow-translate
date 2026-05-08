@@ -1,6 +1,10 @@
 # SiliconFlow Translate
 
+[![VS Code Marketplace](https://img.shields.io/visual-studio-marketplace/v/dnybrew.siliconflow-translate?label=VS%20Code%20Marketplace)](https://marketplace.visualstudio.com/items?itemName=dnybrew.siliconflow-translate)
+
 硅基流动翻译源，用于 [Comment Translate](https://marketplace.visualstudio.com/items?itemName=intellsmi.comment-translate) 插件。
+
+> **[在 VS Code Marketplace 中查看](https://marketplace.visualstudio.com/items?itemName=dnybrew.siliconflow-translate)**
 
 ## 功能特性
 
@@ -70,6 +74,7 @@ MIT
 
 ## 相关链接
 
+- [VS Code Marketplace 下载页面](https://marketplace.visualstudio.com/items?itemName=dnybrew.siliconflow-translate)
 - [Comment Translate 插件](https://github.com/intellism/vscode-comment-translate)
 - [硅基流动API文档](https://docs.siliconflow.cn/cn/api-reference/chat-completions/chat-completions)
 - [硅基流动控制台](https://cloud.siliconflow.cn/)

@@ -19,13 +19,13 @@
     "注释",
     "翻訳"
   ],
-  "homepage": "https://github.com/yourusername/siliconflow-translate#readme",
+  "homepage": "https://github.com/humanbrew/siliconflow-translate#readme",
   "bugs": {
-    "url": "https://github.com/yourusername/siliconflow-translate/issues"
+    "url": "https://github.com/humanbrew/siliconflow-translate/issues"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/yourusername/siliconflow-translate.git"
+    "url": "https://github.com/humanbrew/siliconflow-translate.git"
   },
   "activationEvents": [],
   "main": "./out/extension.js",
